@@ -30,7 +30,7 @@ interface EmailAttachment {
   filename: string
   contentType: string
   size: number
-  content: Buffer | string
+  content: string | ArrayBuffer
 }
 
 export class RealEmailService {
@@ -326,21 +326,31 @@ export class RealEmailService {
       
       switch (connection.provider) {
         case 'gmail':
-          // Test Gmail API access
-          const gmailResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
-            headers: {
-              'Authorization': `Bearer ${connection.auth.pass}`
+          try {
+            const testResponse = await fetch(
+              'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+              {
+                headers: { 'Authorization': `Bearer ${connection.auth.pass}` }
+              }
+            )
+            if (!testResponse.ok) {
+              const errorBody = await testResponse.json().catch(() => ({ error: { message: testResponse.statusText } }));
+              const errorMessage = errorBody.error?.message || `Authentication failed with status: ${testResponse.status}`;
+              console.error('Gmail API auth error:', JSON.stringify(errorBody, null, 2));
+              throw new Error(errorMessage);
             }
-          })
-          
-          if (!gmailResponse.ok) {
-            throw new Error('Gmail API authentication failed')
-          }
-          
-          return {
-            success: true,
-            message: 'Gmail connection successful',
-            details: await gmailResponse.json()
+            const data = await testResponse.json()
+            return {
+              success: true,
+              message: 'Gmail connection successful',
+              details: data
+            }
+          } catch (error: any) {
+            return {
+              success: false,
+              message: 'Gmail API authentication failed',
+              details: error.message
+            }
           }
           
         case 'outlook':

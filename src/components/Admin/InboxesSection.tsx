@@ -27,6 +27,8 @@ import {
   WifiOff
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { EmailProcessingService } from '../../services/emailProcessingService';
+import { InboxService } from '../../services/inboxService';
 import { MockDataService } from '../../services/mockDataService';
 
 interface InboxConfig {
@@ -66,7 +68,7 @@ export const InboxesSection: React.FC = () => {
     try {
       setLoading(true);
       const [inboxesData, brandsData] = await Promise.all([
-        MockDataService.getInboxes(),
+        InboxService.getInboxes(),
         MockDataService.getBrands()
       ]);
       setInboxes(inboxesData);
@@ -117,7 +119,7 @@ export const InboxesSection: React.FC = () => {
   const handleDeleteInbox = async (inboxId: string) => {
     if (window.confirm('Are you sure you want to delete this inbox? This action cannot be undone and will affect any tickets associated with this inbox.')) {
       try {
-        await MockDataService.deleteInbox(inboxId);
+        await InboxService.deleteInbox(inboxId);
         await fetchData();
       } catch (error) {
         console.error('Error deleting inbox:', error);
@@ -130,7 +132,7 @@ export const InboxesSection: React.FC = () => {
     try {
       const inbox = inboxes.find(i => i.id === inboxId);
       if (inbox) {
-        await MockDataService.updateInbox(inboxId, { is_active: !inbox.is_active });
+        await InboxService.updateInbox(inboxId, { is_active: !inbox.is_active });
         await fetchData();
         
         // Update connection status
@@ -150,14 +152,25 @@ export const InboxesSection: React.FC = () => {
     setConnectionStatus(prev => ({ ...prev, [inbox.id]: 'testing' }));
     
     try {
-      const result = await MockDataService.testInboxConnection(inbox);
+      const connectionDetails = {
+        provider: inbox.provider,
+        host: inbox.settings.host,
+        port: inbox.settings.port,
+        secure: inbox.settings.secure,
+        auth: {
+          user: inbox.settings.auth.user,
+          pass: inbox.settings.auth.pass,
+        },
+      };
+
+      const result = await EmailProcessingService.testEmailConnection(connectionDetails);
       
       if (result.success) {
         setConnectionStatus(prev => ({ ...prev, [inbox.id]: 'connected' }));
         alert(`✅ Connection test successful!\n\nServer: ${result.details?.server}\nPort: ${result.details?.port}\nSecure: ${result.details?.secure ? 'Yes' : 'No'}`);
       } else {
         setConnectionStatus(prev => ({ ...prev, [inbox.id]: 'disconnected' }));
-        alert(`❌ Connection test failed: ${result.message}`);
+        alert(`❌ Connection test failed: ${result.message}\n\nDetails: ${result.details || 'No details available.'}`);
       }
     } catch (error) {
       setConnectionStatus(prev => ({ ...prev, [inbox.id]: 'disconnected' }));
@@ -189,7 +202,7 @@ export const InboxesSection: React.FC = () => {
     try {
       console.log(`🔄 Starting enhanced email sync for ${inbox.name}...`);
       
-      const result = await MockDataService.syncInboxEmails(inboxId);
+      const result = await EmailProcessingService.syncInboxEmails(inboxId, useMockAuth);
       
       if (result.success) {
         const message = `📧 Email sync completed successfully!\n\n` +
@@ -223,9 +236,9 @@ export const InboxesSection: React.FC = () => {
   const handleSaveInbox = async (inboxData: any) => {
     try {
       if (editingInbox) {
-        await MockDataService.updateInbox(editingInbox.id, inboxData);
+        await InboxService.updateInbox(editingInbox.id, inboxData);
       } else {
-        await MockDataService.createInbox(inboxData);
+        await InboxService.createInbox(inboxData);
       }
       await fetchData();
       setShowAddModal(false);
@@ -622,6 +635,17 @@ const InboxModal: React.FC<InboxModalProps> = ({ inbox, brands, onClose, onSave 
     }));
   };
 
+  const handleSettingsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        [name]: value
+      }
+    }));
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
@@ -778,35 +802,63 @@ const InboxModal: React.FC<InboxModalProps> = ({ inbox, brands, onClose, onSave 
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={formData.settings.auth.pass}
-                    onChange={(e) => setFormData(prev => ({ 
-                      ...prev, 
-                      settings: { 
-                        ...prev.settings, 
-                        auth: { ...prev.settings.auth, pass: e.target.value }
-                      }
-                    }))}
-                    className="w-full p-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Enter password or app password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  For Gmail, use an App Password. For other providers, use your regular password.
-                </p>
+                {formData.provider === 'gmail' ? (
+                  <div className="col-span-2 relative">
+                    <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Gmail OAuth2 Access Token
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        id="password"
+                        name="auth.pass"
+                        value={formData.settings.auth.pass}
+                        onChange={handleSettingsChange}
+                        placeholder="Paste your OAuth2 token here"
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-sm leading-5"
+                      >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      This is a temporary token from Google. 
+                      <a href="https://developers.google.com/oauthplayground/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
+                        Get one from OAuth Playground
+                      </a>.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="col-span-2">
+                    <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Password / App Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        id="password"
+                        name="auth.pass"
+                        value={formData.settings.auth.pass}
+                        onChange={handleSettingsChange}
+                        placeholder={formData.provider === 'outlook' ? 'Enter your Microsoft account password' : 'Enter IMAP/POP3 password'}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-sm leading-5"
+                      >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -906,7 +958,8 @@ const InboxStatsModal: React.FC<InboxStatsModalProps> = ({ inboxId, onClose }) =
         const data = await MockDataService.getInboxStats(inboxId);
         setStats(data);
       } catch (error) {
-        console.error('Error fetching stats:', error);
+        console.error('Error fetching inbox stats:', error);
+        setStats(null);
       } finally {
         setLoading(false);
       }

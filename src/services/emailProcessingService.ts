@@ -1,6 +1,8 @@
 import { MockDataService } from './mockDataService'
 import { TicketService } from './ticketService'
 import { InboxService } from './inboxService'
+import { RealEmailService } from './realEmailService'
+import { Ticket, TicketStatus } from '../types'
 
 interface EmailMessage {
   id: string
@@ -20,7 +22,7 @@ interface EmailAttachment {
   filename: string
   contentType: string
   size: number
-  content: Buffer | string
+  content: string | ArrayBuffer
 }
 
 interface ProcessedEmail {
@@ -52,7 +54,7 @@ export class EmailProcessingService {
       // and simulate IMAP/POP3 connections with realistic behavior
       
       if (connection.provider === 'gmail') {
-        return await this.fetchGmailEmails(connection)
+        return await RealEmailService.fetchGmailEmails(connection)
       } else if (connection.provider === 'outlook') {
         return await this.fetchOutlookEmails(connection)
       } else {
@@ -67,27 +69,7 @@ export class EmailProcessingService {
   // Gmail API integration (OAuth2 + REST API)
   static async fetchGmailEmails(connection: EmailConnection): Promise<EmailMessage[]> {
     console.log('📧 Fetching emails from Gmail API...')
-    
-    // In a real implementation, this would use Gmail API with OAuth2
-    // For now, we'll simulate realistic Gmail behavior
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    
-    const emails: EmailMessage[] = []
-    
-    // Simulate checking for new emails in the last hour
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
-    
-    // Generate realistic Gmail emails based on current time and patterns
-    const currentHour = new Date().getHours()
-    const emailCount = this.getRealisticEmailCount(currentHour)
-    
-    for (let i = 0; i < emailCount; i++) {
-      const email = this.generateRealisticEmail(connection, i)
-      emails.push(email)
-    }
-    
-    console.log(`📬 Retrieved ${emails.length} new emails from Gmail`)
-    return emails
+    return await RealEmailService.fetchGmailEmails(connection)
   }
 
   // Outlook/Exchange integration (Microsoft Graph API)
@@ -173,6 +155,7 @@ export class EmailProcessingService {
       }
     }
   }
+  // Ok
 
   // Email templates for realistic content generation
   static getEmailTemplates(type: 'enterprise' | 'mixed'): any[] {
@@ -614,7 +597,7 @@ ${signature}`
         // Update ticket status if it was closed/solved
         if (['closed', 'solved'].includes(existingTicket.status)) {
           const updates = { 
-            status: 'open',
+            status: 'open' as TicketStatus,
             updated_at: new Date().toISOString()
           }
           if (useMockAuth) {
